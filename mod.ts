@@ -149,8 +149,6 @@ class WindowsService {
       BigInt(0),
     )
     const u8a = new Uint8Array(bua.buffer)
-
-    Deno.writeFileSync("c:\\temp\\fail.txt", new TextEncoder().encode(`Error code: 8 ${Deno.UnsafePointer.value(this.handlerCallback.pointer)}`), { create: true, append: true })
     const startServiceResult = advapi32.symbols.StartServiceCtrlDispatcherA(Deno.UnsafePointer.of(u8a))
     if (startServiceResult === 0) {
       console.error("Failed to start service control dispatcher")
