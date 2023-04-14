@@ -1,0 +1,11 @@
+{
+  "fmt": {
+    "options": {
+      "lineWidth": 200,
+      "semiColons": false
+    }
+  },
+  "tasks": {
+    "check": "deno fmt && deno lint && deno check service.ts"
+  }
+}
