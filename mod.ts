@@ -6,7 +6,7 @@ switch (Deno.build.os) {
     advapi32 = Deno.dlopen("advapi32.dll", {
       SetServiceStatus: {
         parameters: ["pointer", "pointer"],
-        result: "i32",
+        result: "u64",
       },
       RegisterServiceCtrlHandlerExA: {
         parameters: ["buffer", "pointer", "pointer"],
@@ -14,7 +14,7 @@ switch (Deno.build.os) {
       },
       StartServiceCtrlDispatcherA: {
         parameters: ["pointer"],
-        result: "i32",
+        result: "bool",
       },
     })
     kernel32 = Deno.dlopen("./kernel32.dll", {
@@ -52,7 +52,7 @@ class WindowsService {
   private serviceName: string
   private serviceStatus: WindowsServiceStatus
   private hServiceStatus: number | null = null
-  private handlerCallback: Deno.UnsafeCallback<{ parameters: ["u32", "u32", "pointer", "pointer"]; struct: undefined; result: "void"; }> | null = null
+  private handlerCallback: Deno.UnsafeCallback<{ parameters: ["u32", "u32", "pointer", "pointer"]; struct: undefined; result: "void" }> | null = null
 
   constructor(serviceName: string) {
     this.serviceName = serviceName
@@ -63,7 +63,7 @@ class WindowsService {
       dwWin32ExitCode: 0,
       dwServiceSpecificExitCode: 0,
       dwCheckPoint: 0,
-      dwWaitHint: 0,
+      dwWaitHint: 5000,
     }
   }
 
@@ -85,27 +85,31 @@ class WindowsService {
 
   private serviceCtrlHandler(dwControl: number, callbackMap: Record<string, () => void>) {
     if (dwControl === SERVICE_CONTROL_STOP) {
-      this.serviceStatus.dwCurrentState = SERVICE_STOP_PENDING;
-      this.setServiceStatus(this.serviceStatus);
-      callbackMap["stop"]?.();
+      this.serviceStatus.dwCurrentState = SERVICE_STOP_PENDING
+      this.setServiceStatus(this.serviceStatus)
+      callbackMap["stop"]?.()
     } else if (dwControl === SERVICE_CONTROL_PAUSE) {
-      this.serviceStatus.dwCurrentState = SERVICE_PAUSED;
-      this.setServiceStatus(this.serviceStatus);
-      callbackMap["pause"]?.();
+      this.serviceStatus.dwCurrentState = SERVICE_PAUSED
+      this.setServiceStatus(this.serviceStatus)
+      callbackMap["pause"]?.()
     } else if (dwControl === SERVICE_CONTROL_CONTINUE) {
-      this.serviceStatus.dwCurrentState = SERVICE_RUNNING;
-      this.setServiceStatus(this.serviceStatus);
-      callbackMap["continue"]?.();
+      this.serviceStatus.dwCurrentState = SERVICE_RUNNING
+      this.setServiceStatus(this.serviceStatus)
+      callbackMap["continue"]?.()
     }
   }
 
-
   private async runService(mainFunction: () => Promise<void>) {
-    this.serviceStatus.dwCurrentState = SERVICE_RUNNING;
-    this.setServiceStatus(this.serviceStatus);
+    this.serviceStatus.dwCurrentState = SERVICE_START_PENDING
+    // Update the service status with the new current state and wait hint
+    this.setServiceStatus(this.serviceStatus)
+
+    this.serviceStatus.dwCurrentState = SERVICE_RUNNING
+    this.serviceStatus.dwCheckPoint = 0 // Reset the checkpoint value
+    this.setServiceStatus(this.serviceStatus)
 
     // Wait for the main function to complete
-    await mainFunction();
+    await mainFunction()
   }
 
   public async run(
@@ -119,40 +123,42 @@ class WindowsService {
         result: "void",
       },
       (hServiceStatus: number, dwControl: number) => {
-        this.serviceCtrlHandler(dwControl, callbackMap);
+        this.serviceCtrlHandler(dwControl, callbackMap)
       },
-    );
+    )
 
-    this.handlerCallback = handlerCallback;
+    this.handlerCallback = handlerCallback
 
     this.hServiceStatus = advapi32.symbols.RegisterServiceCtrlHandlerExA(
       new TextEncoder().encode(this.serviceName),
       this.handlerCallback?.pointer,
       null,
-    );
+    )
 
     if (this.hServiceStatus === 0) {
-      console.error("Failed to register service control handler");
-      const error = kernel32.symbols.GetLastError();
-      console.error(`Error code: ${error}`);
-      Deno.exit(1);
+      console.error("Failed to register service control handler")
+      const error = kernel32.symbols.GetLastError()
+      console.error(`Error code: ${error}`)
+      Deno.exit(1)
     }
 
-    const nameBuffer = new TextEncoder().encode(`${this.serviceName}`);
-    const namePointer = BigInt(Deno.UnsafePointer.value(Deno.UnsafePointer.of(nameBuffer)));
-    const cbPointer = BigInt(Deno.UnsafePointer.value(this.handlerCallback.pointer))    
-    const serviceTable = new Uint8Array (
-      BigUint64Array.of(namePointer, cbPointer).buffer
-    );
-    const startServiceResult = advapi32.symbols.StartServiceCtrlDispatcherA(serviceTable);
+    const bua = BigUint64Array.of(
+      BigInt(Deno.UnsafePointer.value(Deno.UnsafePointer.of(new TextEncoder().encode(this.serviceName + "\0")))),
+      BigInt(Deno.UnsafePointer.value(this.handlerCallback.pointer)),
+      BigInt(0),
+      BigInt(0),
+    )
+    const u8a = new Uint8Array(bua.buffer)
+
+    Deno.writeFileSync("c:\\temp\\fail.txt", new TextEncoder().encode(`Error code: 8 ${Deno.UnsafePointer.value(this.handlerCallback.pointer)}`), { create: true, append: true })
+    const startServiceResult = advapi32.symbols.StartServiceCtrlDispatcherA(Deno.UnsafePointer.of(u8a))
     if (startServiceResult === 0) {
-      console.error("Failed to start service control dispatcher");
-      const error = kernel32.symbols.GetLastError();
-      console.error(`Error code: ${error}`);
-      Deno.exit(1);
+      console.error("Failed to start service control dispatcher")
+      const error = kernel32.symbols.GetLastError()
+      console.error(`Error code: ${error}`)
+      Deno.exit(1)
     }
-
-    await this.runService(mainFunction);
+    await this.runService(mainFunction)
   }
 
   public async stop() {
