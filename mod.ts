@@ -138,11 +138,12 @@ class WindowsService {
       Deno.exit(1);
     }
 
-    const serviceTable = new ArrayBuffer(12);
-    const serviceTableView = new DataView(serviceTable);
-    serviceTableView.setUint32(0, this.serviceName, true);
-    serviceTableView.setUint32(4, this.handlerCallback.pointer, true);
-
+    const nameBuffer = new TextEncoder().encode(`${this.serviceName}`);
+    const namePointer = BigInt(Deno.UnsafePointer.value(Deno.UnsafePointer.of(nameBuffer)));
+    const cbPointer = BigInt(Deno.UnsafePointer.value(this.handlerCallback.pointer))    
+    const serviceTable = new Uint8Array (
+      BigUint64Array.of(namePointer, cbPointer).buffer
+    );
     const startServiceResult = advapi32.symbols.StartServiceCtrlDispatcherA(serviceTable);
     if (startServiceResult === 0) {
       console.error("Failed to start service control dispatcher");
