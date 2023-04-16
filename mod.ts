@@ -1,3 +1,5 @@
+const worker = new Worker(new URL("./worker.ts", import.meta.url).href, { type: "module" })
+
 let advapi32: Record<string, any>
 let kernel32: Record<string, any>
 
@@ -10,11 +12,7 @@ switch (Deno.build.os) {
       },
       RegisterServiceCtrlHandlerExA: {
         parameters: ["buffer", "pointer", "pointer"],
-        result: "pointer",
-      },
-      StartServiceCtrlDispatcherA: {
-        parameters: ["pointer"],
-        result: "bool",
+        result: "u64",
       },
     })
     kernel32 = Deno.dlopen("./kernel32.dll", {
@@ -48,12 +46,38 @@ const SERVICE_CONTROL_PAUSE = 0x00000002
 const SERVICE_CONTROL_CONTINUE = 0x00000003
 const SERVICE_PAUSED = 0x00000007
 
+/**
+ * WindowsService class for managing Windows services.
+ */
 class WindowsService {
   private serviceName: string
   private serviceStatus: WindowsServiceStatus
-  private hServiceStatus: number | null = null
-  private handlerCallback: Deno.UnsafeCallback<{ parameters: ["u32", "u32", "pointer", "pointer"]; struct: undefined; result: "void" }> | null = null
+  private hServiceStatus: bigint | null = null
+  private handlerCallback:
+    | Deno.UnsafeCallback<{
+      parameters: ["u32", "u32", "pointer", "pointer"]
+      struct: undefined
+      result: "void"
+    }>
+    | null = null
+  private callbackMap: Record<string, () => void> = {}
+  private runFn?: () => Promise<void>
+  private statusBuffer?: ArrayBuffer
+  private waitForResponseSeconds = 10
+  private unsafeRefs = new Map()
+  private serviceMainStarted = false
+  private debugCallback?: (message: string) => void
+  private serviceMainCallback?: Deno.UnsafeCallback<{
+    parameters: ["u64", "pointer"]
+    result: "void"
+  }>
+  private worker: Worker
 
+  /**
+   * Creates a new WindowsService instance.
+   *
+   * @param serviceName - The name of the Windows service.
+   */
   constructor(serviceName: string) {
     this.serviceName = serviceName
     this.serviceStatus = {
@@ -63,10 +87,20 @@ class WindowsService {
       dwWin32ExitCode: 0,
       dwServiceSpecificExitCode: 0,
       dwCheckPoint: 0,
-      dwWaitHint: 5000,
+      dwWaitHint: 0,
     }
+    this.worker = new Worker(
+      new URL("./worker.ts", import.meta.url).href,
+      { type: "module" },
+    )
   }
 
+  /**
+   * Sets the service status.
+   *
+   * @param serviceStatus - The service status object.
+   * @private
+   */
   private setServiceStatus(serviceStatus: WindowsServiceStatus) {
     const statusBuffer = new ArrayBuffer(28)
     const statusView = new DataView(statusBuffer)
@@ -77,99 +111,208 @@ class WindowsService {
     statusView.setUint32(16, serviceStatus.dwServiceSpecificExitCode, true)
     statusView.setUint32(20, serviceStatus.dwCheckPoint, true)
     statusView.setUint32(24, serviceStatus.dwWaitHint, true)
-
+    this.statusBuffer = statusBuffer
     if (this.hServiceStatus) {
-      return advapi32.symbols.SetServiceStatus(this.hServiceStatus, statusBuffer)
+      return advapi32.symbols.SetServiceStatus(
+        Deno.UnsafePointer.create(this.hServiceStatus),
+        Deno.UnsafePointer.of(this.statusBuffer),
+      )
     }
   }
 
-  private serviceCtrlHandler(dwControl: number, callbackMap: Record<string, () => void>) {
-    if (dwControl === SERVICE_CONTROL_STOP) {
+  /**
+   * Handles service control events.
+   *
+   * @param controlCode - The control code received.
+   * @param eventType - The event type.
+   * @private
+   */
+  private serviceCtrlHandler(controlCode: number, eventType: number) {
+    this.logDebug("serviceCtrlHandler(): " + controlCode)
+    if (controlCode === SERVICE_CONTROL_STOP) {
       this.serviceStatus.dwCurrentState = SERVICE_STOP_PENDING
       this.setServiceStatus(this.serviceStatus)
-      callbackMap["stop"]?.()
-    } else if (dwControl === SERVICE_CONTROL_PAUSE) {
+      this.callbackMap["stop"]?.()
+    } else if (controlCode === SERVICE_CONTROL_PAUSE) {
       this.serviceStatus.dwCurrentState = SERVICE_PAUSED
       this.setServiceStatus(this.serviceStatus)
-      callbackMap["pause"]?.()
-    } else if (dwControl === SERVICE_CONTROL_CONTINUE) {
+      this.callbackMap["pause"]?.()
+    } else if (controlCode === SERVICE_CONTROL_CONTINUE) {
       this.serviceStatus.dwCurrentState = SERVICE_RUNNING
       this.setServiceStatus(this.serviceStatus)
-      callbackMap["continue"]?.()
+      this.callbackMap["continue"]?.()
     }
   }
 
-  private async runService(mainFunction: () => Promise<void>) {
-    this.serviceStatus.dwCurrentState = SERVICE_START_PENDING
-    // Update the service status with the new current state and wait hint
-    this.setServiceStatus(this.serviceStatus)
+  /**
+   * ServiceMain function called by Service Control Manager (SCM).
+   *
+   * @param argc - Number of arguments.
+   * @param argv - Array of argument strings.
+   * @public
+   */
+  public async ServiceMain(argc: number, argv: string[] | null) {
+    this.logDebug("ServiceMain()")
 
-    this.serviceStatus.dwCurrentState = SERVICE_RUNNING
-    this.serviceStatus.dwCheckPoint = 0 // Reset the checkpoint value
-    this.setServiceStatus(this.serviceStatus)
+    this.serviceMainStarted = true
 
-    // Wait for the main function to complete
-    await mainFunction()
-  }
-
-  public async run(
-    mainFunction: () => Promise<void>,
-    callbackMap: Record<string, () => void> = {},
-  ) {
+    // Call RegisterServiceCtrlHandlerExA
     const handlerCallback = new Deno.UnsafeCallback(
       {
         parameters: ["u32", "u32", "pointer", "pointer"],
         struct: undefined,
         result: "void",
       },
-      (hServiceStatus: number, dwControl: number) => {
-        this.serviceCtrlHandler(dwControl, callbackMap)
+      (
+        controlCode: number,
+        eventType: number,
+        _eventDataPointer: Deno.PointerValue,
+        _contextPointer: Deno.PointerValue,
+      ) => {
+        this.serviceCtrlHandler(controlCode, eventType)
       },
     )
-
     this.handlerCallback = handlerCallback
-
     this.hServiceStatus = advapi32.symbols.RegisterServiceCtrlHandlerExA(
       new TextEncoder().encode(this.serviceName),
       this.handlerCallback?.pointer,
       null,
     )
-
-    if (this.hServiceStatus === 0) {
+    if (this.hServiceStatus === BigInt(0)) {
       console.error("Failed to register service control handler")
       const error = kernel32.symbols.GetLastError()
       console.error(`Error code: ${error}`)
-      Deno.exit(1)
+      this.stop()
     }
 
-    const bua = BigUint64Array.of(
-      BigInt(Deno.UnsafePointer.value(Deno.UnsafePointer.of(new TextEncoder().encode(this.serviceName + "\0")))),
-      BigInt(Deno.UnsafePointer.value(this.handlerCallback.pointer)),
-      BigInt(0),
-      BigInt(0),
-    )
-    const u8a = new Uint8Array(bua.buffer)
-    const startServiceResult = advapi32.symbols.StartServiceCtrlDispatcherA(Deno.UnsafePointer.of(u8a))
-    if (startServiceResult === 0) {
-      console.error("Failed to start service control dispatcher")
-      const error = kernel32.symbols.GetLastError()
-      console.error(`Error code: ${error}`)
-      Deno.exit(1)
-    }
-    await this.runService(mainFunction)
+    // Set service status
+    this.serviceStatus.dwCurrentState = SERVICE_START_PENDING
+    this.serviceStatus.dwCheckPoint = 0 // Reset the checkpoint value
+    this.setServiceStatus(this.serviceStatus)
+
+    // Set service status
+    this.serviceStatus.dwCurrentState = SERVICE_RUNNING
+    this.serviceStatus.dwCheckPoint = 0 // Reset the checkpoint value
+    this.setServiceStatus(this.serviceStatus)
+
+    // Done, start the requested function
+    this.runFn && await this.runFn()
+
+    // Requested function done, stop service and quit
+    this.stop()
   }
 
-  public async stop() {
+  /**
+   * Main entrypoint for the service.
+   *
+   * @public
+   */
+  public async run() {
+
+
+    // Define serviceMain callback
+    const serviceMainCallback = new Deno.UnsafeCallback(
+      {
+        parameters: ["u64", "pointer"],
+        result: "void",
+      },
+      (argc: number | bigint, argv: Deno.PointerValue) => {
+        this.ServiceMain(Number(argc), null)
+      },
+    )
+
+    // Store a reference to this callback
+    this.serviceMainCallback = serviceMainCallback
+
+    // Prepare a ServiceTable for StartServiceCtrlDispatcherA
+    // - Make a null terminated version of service name, and encode it
+    const serviceName = this.serviceName + "\0"
+    const serviceNameEncoded = new TextEncoder().encode(serviceName)
+    // - Create a 32 byte arraybuffer to accomodate 2 SERVICE_TABLE_ENTRY, where the last one is nulled
+    const serviceTableBuffer = new ArrayBuffer(32)
+    const serviceTableView = new DataView(serviceTableBuffer)
+    serviceTableView.setBigUint64(0, BigInt(Deno.UnsafePointer.value(Deno.UnsafePointer.of(serviceNameEncoded))), true)
+    serviceTableView.setBigUint64(8, BigInt(Deno.UnsafePointer.value(serviceMainCallback.pointer)), true)
+
+    // Store a reference to the service table buffer to prevent GC
+    const serviceTablePointerValue = Deno.UnsafePointer.value(Deno.UnsafePointer.of(serviceTableBuffer))
+    this.unsafeRefs.set("serviceTableBuffer", serviceTableBuffer)
+
+    // Call StartServiceCtrlDispatcherA through the worker
+    worker.postMessage(serviceTablePointerValue)
+
+    // Keep process alive while waiting for an answer
+    let timeout = false
+    const timeoutTimer = setTimeout(() => {
+      timeout = true
+    }, this.waitForResponseSeconds * 1000)
+    while (!(this.serviceMainStarted || timeout)) {
+      // Wait a bit
+      await new Promise((r) =>
+        setTimeout(() => {
+          r(0)
+        }, 250)
+      )
+    }
+    clearTimeout(timeoutTimer)
+
+    // Did we get an answer? If not, exit!
+    if (!this.serviceMainStarted) {
+      this.stop()
+    }
+  }
+
+  /**
+   * Logs a debug message.
+   *
+   * @param message - The message to log.
+   * @private
+   */
+  private logDebug(message: string) {
+    this.debugCallback?.(message)
+  }
+
+  /**
+   * Stops the service.
+   *
+   * @public
+   */
+  public stop() {
+    this.logDebug("stop()")
     if (this.handlerCallback) {
       this.serviceStatus.dwCurrentState = SERVICE_STOP_PENDING
+      this.serviceStatus.dwCheckPoint = 0
+      this.setServiceStatus(this.serviceStatus)
+      this.serviceStatus.dwCurrentState = SERVICE_STOPPED
+      this.serviceStatus.dwCheckPoint = 0
       this.setServiceStatus(this.serviceStatus)
       this.handlerCallback.close()
-      this.handlerCallback = null
-      this.hServiceStatus = null
-      this.serviceStatus.dwCurrentState = SERVICE_STOPPED
-      this.setServiceStatus(this.serviceStatus)
+    }
+    if (this.serviceMainCallback) {
+      this.serviceMainCallback.close()
+    }
+    this.unsafeRefs.clear()
+    worker.terminate()
+  }
+
+  /**
+  *
+  * Registers a callback function for a specific event.
+  * @param eventName - The name of the event to register the callback for (debug, start, stop, continue).
+  * @param callback - The callback function to be executed when the event is triggered.
+  * @public
+  */
+  public on(eventName: string, callback: unknown): void {
+    this.logDebug("on(): " + eventName)
+    if (eventName === "debug") {
+      this.debugCallback = callback as (message: string) => void
+    } else if (["stop", "continue", "pause"].includes(eventName)) {
+      this.callbackMap[eventName] = callback as () => void
+    } else if (eventName === "main") {
+      this.runFn = callback as (argc?: number, argv?: string[]) => Promise<void>
+    } else {
+      throw new Error("Tried to register unknown callback")
     }
   }
 }
-
 export { WindowsService }

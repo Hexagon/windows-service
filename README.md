@@ -1,5 +1,7 @@
 # Windows Service for Deno
 
+## Note - This is work in progress
+
 A Deno library that provides a simple way to create Windows services using Deno applications without any external tools.
 
 ## Features
@@ -18,11 +20,13 @@ To use the `windows-service` library in your project, add the following import s
 
 `import { WindowsService } from "https://deno.land/x/windows_service/mod.ts";
 
-class MyService extends WindowsService { // Implement your service logic here // ... }
-
-const myService = new MyService("MyService"); await myService.run(/* ... */);`
-
 For more details and examples, please refer to the [example implementation](https://deno.land/x/windows_service/example.ts).
+
+Install the service with
+
+```
+sc.exe create test-s-62 binPath= "c:\full\path\to\deno.exe run -A --unstable --allow-ffi C:/path/to/windows-service/example.ts"
+```
 
 ## License
 
