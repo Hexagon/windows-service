@@ -26,11 +26,8 @@ exampleService.on("main", async () => {
   const _output = new TextDecoder().decode(status.stdout)
 
   // Wait a bit
-  await new Promise((r) =>
-    setTimeout(() => {
-      r(0)
-    }, 6000)
-  )
+  await new Promise((r) => setTimeout(() => { r(0) }, 6000))
+  
 })
 
 /*
