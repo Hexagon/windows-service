@@ -1,7 +1,5 @@
 # Windows Service for Deno
 
-## Note - This is work in progress
-
 A Deno library that provides a simple way to create Windows services using Deno applications without any external tools.
 
 ## Features
