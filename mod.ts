@@ -1,36 +1,11 @@
 import { SERVICE_CONTROL_CONTINUE, SERVICE_CONTROL_PAUSE, SERVICE_CONTROL_STOP, WindowsServiceStatus } from "./servicestatus.ts"
 
-// worker.ts represented as base64
-const workerSource = "bGV0IGFkdmFwaTMyOiBSZWNvcmQ8c3RyaW5nLCBhbnk+Cgpzd2l0Y2ggKERlbm8uYnVpbGQub3MpIHsKICBjYXNlICJ3aW5kb3dzIjoKICAgIGFkdmFwaTMyID0gRGVuby5kbG9wZW4oImFkdmFwaTMyLmRsbCIsIHsKICAgICAgU3RhcnRTZXJ2aWNlQ3RybERpc3BhdGNoZXJBOiB7CiAgICAgICAgcGFyYW1ldGVyczogWyJwb2ludGVyIl0sCiAgICAgICAgcmVzdWx0OiAidTY0IiwKICAgICAgfSwKICAgIH0pCiAgICBicmVhawogIGRlZmF1bHQ6CiAgICB0aHJvdyBuZXcgRXJyb3IoIlVuc3VwcG9ydGVkIE9TIikKfQoKLyoqCiAqIEhhbmRsZXMgaW5jb21pbmcgbWVzc2FnZXMgZnJvbSB0aGUgbWFpbiBzY3JpcHQuCiAqCiAqIEBwYXJhbSBldmVudCAtIEEgbWVzc2FnZSBldmVudCBjb250YWluaW5nIHRoZSB1bnNhZmUgcG9pbnRlciB2YWx1ZSBmb3IgdGhlIHNlcnZpY2UgdGFibGUuCiAqLwpzZWxmLm9ubWVzc2FnZSA9IChldmVudDogTWVzc2FnZUV2ZW50KSA9PiB7CiAgY29uc3QgdW5zYWZlUG9pbnRlclZhbHVlID0gQmlnSW50KGV2ZW50LmRhdGEpCgogIGNvbnN0IHN0YXJ0U2VydmljZVJlc3VsdCA9IGFkdmFwaTMyLnN5bWJvbHMuU3RhcnRTZXJ2aWNlQ3RybERpc3BhdGNoZXJBKAogICAgRGVuby5VbnNhZmVQb2ludGVyLmNyZWF0ZSh1bnNhZmVQb2ludGVyVmFsdWUpLAogICkKICBpZiAoc3RhcnRTZXJ2aWNlUmVzdWx0ID09PSAwKSB7CiAgICBjb25zb2xlLmVycm9yKCJGYWlsZWQgdG8gc3RhcnQgc2VydmljZSBjb250cm9sIGRpc3BhdGNoZXIiKQogIH0KICBnbG9iYWxUaGlzLnBvc3RNZXNzYWdlKCJkb25lIikKfQo="
-
-let advapi32: Record<string, any>
-let kernel32: Record<string, any>
-
 interface WindowsServiceCallbacks {
-  debug?: (message: string) => void;
-  stop?: () => void;
-  continue?: () => void;
-  pause?: () => void;
-  main?: (argc?: number, argv?: string[]) => Promise<void>;
-}
-
-switch (Deno.build.os) {
-  case "windows":
-    advapi32 = Deno.dlopen("advapi32.dll", {
-      RegisterServiceCtrlHandlerExA: {
-        parameters: ["buffer", "pointer", "pointer"],
-        result: "u64",
-      },
-    })
-    kernel32 = Deno.dlopen("./kernel32.dll", {
-      GetLastError: {
-        parameters: [],
-        result: "u32",
-      },
-    })
-    break
-  default:
-    throw new Error("Unsupported OS")
+  debug?: (message: string) => void
+  stop?: () => void
+  continue?: () => void
+  pause?: () => void
+  main?: (argc?: number, argv?: string[]) => Promise<void>
 }
 
 /**
@@ -39,7 +14,23 @@ switch (Deno.build.os) {
 class WindowsService {
   private serviceName: string
   private serviceStatus?: WindowsServiceStatus
-  private hServiceStatus: bigint | null = null
+  private callbackMap: WindowsServiceCallbacks = {}
+  private waitForResponseSeconds = 10
+  private unsafeRefs = new Map()
+  private serviceMainStarted = false
+  private debugCallback?: (message: string) => void
+
+  // Win32 API
+  private advapi32: Record<string, any>
+  private kernel32: Record<string, any>
+
+  // Win32 API implementation
+  // - Callback from StartServiceCtrlDispatcherA)
+  private serviceMainCallback?: Deno.UnsafeCallback<{
+    parameters: ["u64", "pointer"]
+    result: "void"
+  }>
+  // - Callback from RegisterServiceCtrlHandlerExA
   private handlerCallback:
     | Deno.UnsafeCallback<{
       parameters: ["u32", "u32", "pointer", "pointer"]
@@ -47,25 +38,38 @@ class WindowsService {
       result: "void"
     }>
     | null = null
-  private callbackMap: WindowsServiceCallbacks = {}
-  private runFn?: () => Promise<void>
-  private waitForResponseSeconds = 10
-  private unsafeRefs = new Map()
-  private serviceMainStarted = false
-  private debugCallback?: (message: string) => void
-  private serviceMainCallback?: Deno.UnsafeCallback<{
-    parameters: ["u64", "pointer"]
-    result: "void"
-  }>
+  // - Service status handle
+  private hServiceStatus: bigint | null = null
+  // . Worker running a separate thread for StartServiceCtrlDispatcherA
   private dispatcherThread?: Worker
 
   /**
-   * Creates a new WindowsService instance.
+   * Creates a new WindowsService instance and initializes win32 api
    *
    * @param serviceName - The name of the Windows service.
    */
   constructor(serviceName: string) {
     this.serviceName = serviceName
+
+    // Set up Win32 API functions through FFI
+    switch (Deno.build.os) {
+      case "windows":
+        this.advapi32 = Deno.dlopen("advapi32.dll", {
+          RegisterServiceCtrlHandlerExA: {
+            parameters: ["buffer", "pointer", "pointer"],
+            result: "u64",
+          },
+        })
+        this.kernel32 = Deno.dlopen("./kernel32.dll", {
+          GetLastError: {
+            parameters: [],
+            result: "u32",
+          },
+        })
+        break
+      default:
+        throw new Error("Unsupported OS")
+    }
   }
 
   /**
@@ -127,14 +131,14 @@ class WindowsService {
       },
     )
     this.handlerCallback = handlerCallback
-    this.hServiceStatus = advapi32.symbols.RegisterServiceCtrlHandlerExA(
+    this.hServiceStatus = this.advapi32.symbols.RegisterServiceCtrlHandlerExA(
       new TextEncoder().encode(this.serviceName),
       this.handlerCallback?.pointer,
       null,
     )
     if (this.hServiceStatus === BigInt(0) || this.hServiceStatus === null) {
       this.logDebug("Failed to register service control handler")
-      const error = kernel32.symbols.GetLastError()
+      const error = this.kernel32.symbols.GetLastError()
       this.logDebug(`Error code: ${error}`)
       this.stop()
     }
@@ -163,7 +167,10 @@ class WindowsService {
    *
    * @public
    */
-  public async run() {
+  public async run(mainFunction: (argc?: number, argv?: string[]) => Promise<void>) {
+    // Store a reference to the supplied main function
+    this.callbackMap["main"] = mainFunction
+
     // Define serviceMain callback
     const serviceMainCallback = new Deno.UnsafeCallback(
       {
@@ -194,7 +201,7 @@ class WindowsService {
 
     // Call StartServiceCtrlDispatcherA through the worker
     //this.dispatcherThread = new Worker(`data:application/typescript;base64,${workerSource}`, { type: "module" })
-    this.dispatcherThread = new Worker(new URL("./dispatcher.ts", import.meta.url).href, { type: "module" })
+    this.dispatcherThread = new Worker(new URL("./dispatcher.js", import.meta.url).href, { type: "module" })
 
     // Send start
     this.dispatcherThread.postMessage(serviceTablePointerValue)
@@ -280,8 +287,6 @@ class WindowsService {
       this.callbackMap["continue"] = callback as () => void
     } else if (eventName === "pause") {
       this.callbackMap["pause"] = callback as () => void
-    } else if (eventName === "main") {
-      this.callbackMap["main"] = callback as (argc?: number, argv?: string[]) => Promise<void>
     } else {
       this.logDebug("Tried to register unknown callback: " + eventName)
     }

@@ -6,33 +6,30 @@
  * StartServiceCtrlDispatcherA will not return until the service has stopped.
  *
  * @file dispatcher.ts
- * 
- * -----------------------------------------------------------------------------------------
- * NOTE: This file is base64 encoded and bundled in mod.ts by default, to support compiling.
- * -----------------------------------------------------------------------------------------
  */
-
-let advapi32: Record<string, any>
-
-switch (Deno.build.os) {
-  case "windows":
-    advapi32 = Deno.dlopen("advapi32.dll", {
-      StartServiceCtrlDispatcherA: {
-        parameters: ["pointer"],
-        result: "u64",
-      },
-    })
-    break
-  default:
-    throw new Error("Unsupported OS")
-}
 
 /**
  * Handles incoming messages from the main script.
  *
  * @param event - A message event containing the unsafe pointer value for the service table.
  */
-self.onmessage = (event: MessageEvent) => {
+self.onmessage = (event) => {
+  
+  let advapi32
+
+  switch (Deno.build.os) {
+    case "windows":
+      advapi32 = Deno.dlopen("advapi32.dll", {
+        StartServiceCtrlDispatcherA: {
+          parameters: ["pointer"],
+          result: "u64",
+        },
+      })
+      break
+    default:
+      throw new Error("Unsupported OS")
+  }
+
   const unsafePointerValue = BigInt(event.data)
 
   const startServiceResult = advapi32.symbols.StartServiceCtrlDispatcherA(

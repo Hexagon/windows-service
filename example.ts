@@ -19,8 +19,8 @@ exampleService.on("stop", () => {
   exampleService.stop()
 })
 
-// This is the main loop that should run when the service is running
-exampleService.on("main", async () => {
+// This starts the service
+await exampleService.run(async () => {
   console.log("Running service logic...")
 
   // Run an external command using Deno.Command
@@ -46,6 +46,3 @@ exampleService.on("main", async () => {
   // - This sends a message to SCM that the service has stopped, and makes some cleanup
   exampleService.stop()
 })
-
-// This starts the service
-await exampleService.run()
