@@ -14,7 +14,6 @@
  * @param event - A message event containing the unsafe pointer value for the service table.
  */
 self.onmessage = (event) => {
-  
   let advapi32
 
   switch (Deno.build.os) {
