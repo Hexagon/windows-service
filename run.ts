@@ -36,14 +36,6 @@ if (args.debug) {
 } else {
   const service = new WindowsService(args.serviceName || "generic-service")
 
-  service.on("debug", (message: string) => {
-    Deno.writeFileSync(
-      "c:\\temp\\service.log",
-      new TextEncoder().encode(`${new Date().toISOString()}> ${message}\n`),
-      { create: true, append: true },
-    )
-  })
-
   service.on("stop", () => {
     service.stop()
   })
