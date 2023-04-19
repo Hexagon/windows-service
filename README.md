@@ -15,49 +15,49 @@ To use the `windows-service` library in your project, add the following import s
 
 ## Usage
 
-    // Create a new WindowsService instance
-    const service = new WindowsService("MyDenoServiceWithCallbacks")
+```ts
+// Create a new WindowsService instance
+const service = new WindowsService("MyDenoServiceWithCallbacks")
 
-    // Define the main function for your service
-    async function main() {
-      console.log("Service started.")
-      // Your service logic here...
-    }
+// Define the main function for your service
+async function main() {
+  console.log("Service started.")
+  // Your service logic here...
+}
 
-    // Set the main function as the entry point
-    service.on("main", async () => {
-      await main()
+// This is a request from the SCM to stop the service
+exampleService.on("stop", () => {
+  // Do stuff ...
 
-      // This sends a message to SCM that the service has stopped, and makes some cleanup
-      exampleService.stop()
-    })
+  // Do stop the service
+  // - This is done automatically if no handler for 'stop' event is defined.
+  //   But included here for demonstration.
+  exampleService.stop()
+})
 
-    // This is a request from the SCM to stop the service
-    exampleService.on("stop", () => {
-      // Do stuff ...
-
-      // Do stop the service
-      // - This is done automatically if no handler for 'stop' event is defined.
-      //   But included here for demonstration.
-      exampleService.stop()
-    })
-
-    // Start the service
-    service.start()
+// Start the service, pass the main function
+service.start(main)
+```
 
 For more details and examples, please refer to the [example implementation](https://deno.land/x/windows_service/example.ts).
 
 Install the service with
 
-    sc.exe create my-test-service binPath= "c:\full\path\to\deno.exe run" -A --unstable --allow-ffi "C:/path/to/windows-service/example.ts"
+``` 
+sc.exe create my-test-service binPath= "c:\full\path\to\deno.exe run" -A --unstable --allow-ffi "C:/path/to/windows-service/example.ts"
+```
 
 **Or** compile it using
 
-    deno compile -A --unstable --allow-ffi example.ts --include dispatcher.js --output my-test-service.exe
+```
+deno compile -A --unstable --allow-ffi example.ts --include dispatcher.js --output my-test-service.exe
+```
 
 And install using
 
-    sc.exe create my-test-service binPath= "C:/path/to/windows-service/my-test-service.ts"
+```
+sc.exe create my-test-service binPath= "C:/path/to/windows-service/my-test-service.ts"
+```
 
 Note that dispatcher.ts need to be included using `--include` at compile time, else the service worker wont work.
 
