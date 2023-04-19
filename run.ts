@@ -17,12 +17,9 @@ async function executeCommand() {
     env.PATH = Deno.env.get("PATH") as string
   }
 
-  console.log(env, Deno.cwd())
-  console.log(env.PATH)
-
   // Pass path and CWD
-  const cmd = new Deno.Command(command, {
-    args: commandArgs,
+  const cmd = new Deno.Command("cmd", {
+    args: ["/C",command,...commandArgs],
     env: env,
     cwd: Deno.cwd(),
     stdout: "piped",
