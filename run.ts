@@ -12,8 +12,19 @@ const commandArgs = commandWithArgs.slice(1)
 async function executeCommand() {
   console.log("Running command...")
 
+  const env: Record<string, string> = {}
+  if (Deno.env.get("PATH")) {
+    env.PATH = Deno.env.get("PATH") as string
+  }
+
+  console.log(env, Deno.cwd())
+  console.log(env.PATH)
+
+  // Pass path and CWD
   const cmd = new Deno.Command(command, {
     args: commandArgs,
+    env: env,
+    cwd: Deno.cwd(),
     stdout: "piped",
     stderr: "piped",
   })
