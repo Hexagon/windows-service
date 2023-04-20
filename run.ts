@@ -9,14 +9,13 @@ const commandWithArgs = args["--"] || []
 const command = commandWithArgs[0] || "cmd"
 const commandArgs = commandWithArgs.slice(1)
 
-async function executeCommand() {
-  console.log("Running command...")
+let process: Deno.ChildProcess | undefined
 
+async function executeCommand() {
   const env: Record<string, string> = {}
   if (Deno.env.get("PATH")) {
     env.PATH = Deno.env.get("PATH") as string
   }
-
   // Pass path and CWD
   const cmd = new Deno.Command("cmd", {
     args: ["/C",command,...commandArgs],
@@ -25,32 +24,21 @@ async function executeCommand() {
     stdout: "piped",
     stderr: "piped",
   })
-
-  const status = await cmd.output()
-  const output = new TextDecoder().decode(status.stdout)
-  console.log(output)
+  process = cmd.spawn()
+  const result = await process.output()
+  console.log(new TextDecoder().decode(result.stdout), new TextDecoder().decode(result.stderr))
 }
 
 if (args.debug) {
   await executeCommand()
 } else {
   const service = new WindowsService(args.serviceName || "generic-service")
-
   service.on("stop", () => {
+    process?.kill()
     service.stop()
   })
-
   await service.run(async () => {
-    console.log("Running service logic...")
-
     await executeCommand()
-
-    await new Promise((resolve) => {
-      setTimeout(() => {
-        resolve(0)
-      }, 100000)
-    })
-
     service.stop()
   })
 }

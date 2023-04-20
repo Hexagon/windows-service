@@ -26,13 +26,13 @@ async function main() {
 }
 
 // This is a request from the SCM to stop the service
-exampleService.on("stop", () => {
+service.on("stop", () => {
   // Do stuff ...
 
   // Do stop the service
   // - This is done automatically if no handler for 'stop' event is defined.
   //   But included here for demonstration.
-  exampleService.stop()
+  service.stop()
 })
 
 // Start the service, pass the main function
