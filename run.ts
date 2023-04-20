@@ -28,14 +28,25 @@ async function executeCommand() {
   await process.output()
 }
 
+async function killProcess(pid: number) {
+  const cmd = new Deno.Command("taskkill", {
+    args: ["/f","/pid",pid.toString()],
+    stdout: "piped",
+    stderr: "piped",
+  })
+  process = cmd.spawn()
+  await process.output()
+}
 if (args.debug) {
   await executeCommand()
 } else {
   const service = new WindowsService(args.serviceName || "generic-service")
   service.on("stop", () => {
+    // Try to kill child process using Deno
+    if (process?.pid) Deno.kill(process.pid)
+    // Try to kill child process using taskkill
+    if (process?.pid) killProcess(process.pid)
     service.stop()
-    // This seem like the only way to forcefully quit a process started by Deno
-    Deno.exit()
   })
   await service.run(async () => {
     await executeCommand()
