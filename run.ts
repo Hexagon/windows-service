@@ -25,8 +25,7 @@ async function executeCommand() {
     stderr: "piped",
   })
   process = cmd.spawn()
-  const result = await process.output()
-  console.log(new TextDecoder().decode(result.stdout), new TextDecoder().decode(result.stderr))
+  await process.output()
 }
 
 if (args.debug) {
@@ -34,8 +33,9 @@ if (args.debug) {
 } else {
   const service = new WindowsService(args.serviceName || "generic-service")
   service.on("stop", () => {
-    process?.kill()
     service.stop()
+    // This seem like the only way to forcefully quit a process started by Deno
+    Deno.exit()
   })
   await service.run(async () => {
     await executeCommand()
