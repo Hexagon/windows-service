@@ -30,6 +30,10 @@ await exampleService.run(async () => {
     stderr: "piped",
   })
 
+  // Make sure the child process is tied to the main process
+  const process = cmd.spawn()
+  process.ref()
+
   const status = await cmd.output()
 
   // Read the output of the external command
