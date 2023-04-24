@@ -6,6 +6,8 @@ const args = parse(Deno.args, { "--": true })
 
 // Get the command and its arguments from the command line
 const commandWithArgs = args["--"] || []
+const command = commandWithArgs[0]
+const commandArguments = commandWithArgs.slice(1)
 
 let process: Deno.ChildProcess | undefined
 
@@ -15,8 +17,8 @@ async function executeCommand() {
     env.PATH = Deno.env.get("PATH") as string
   }
   // Pass path and CWD
-  const cmd = new Deno.Command("cmd", {
-    args: ["/C",...commandWithArgs],
+  const cmd = new Deno.Command(command, {
+    args: [...commandArguments],
     env: env,
     cwd: Deno.cwd(),
     stdout: "piped",
@@ -24,7 +26,8 @@ async function executeCommand() {
   })
   process = cmd.spawn()
   process.ref()
-  await cmd.output()
+  const result = await process.output()
+  return result
 }
 
 if (args.debug) {
@@ -32,8 +35,8 @@ if (args.debug) {
 } else {
   const service = new WindowsService(args.serviceName || "generic-service")
   service.on("stop", () => {
-    // As the executed command is refed, it will automatically terminate when the service terminates
-    service.stop()
+    // Try to kill child process using taskkill
+    if (process?.pid) process.kill()
   })
   await service.run(async () => {
     await executeCommand()
