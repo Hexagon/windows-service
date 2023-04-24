@@ -155,7 +155,7 @@ class WindowsService {
     // Done, start the requested function
     if (this.#callbackMap.main) {
       this.logDebug("Delegating to registered main function.")
-      this.#callbackMap.main()
+      await this.#callbackMap.main()
     } else {
       this.logDebug("No main function registered, stopping instantly")
       this.stop()
