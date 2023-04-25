@@ -12,36 +12,36 @@ interface WindowsServiceCallbacks {
  * WindowsService class for managing Windows services.
  */
 class WindowsService {
-  #serviceName: string;
-  #serviceStatus?: WindowsServiceStatus;
-  #callbackMap: WindowsServiceCallbacks = {};
-  #waitForResponseSeconds = 10;
-  #unsafeRefs = new Map();
-  #serviceMainStarted = false;
-  #debugCallback?: (message: string) => void;
+  #serviceName: string
+  #serviceStatus?: WindowsServiceStatus
+  #callbackMap: WindowsServiceCallbacks = {}
+  #waitForResponseSeconds = 10
+  #unsafeRefs = new Map()
+  #serviceMainStarted = false
+  #debugCallback?: (message: string) => void
 
   // Win32 API
-  #advapi32: Record<string, any>;
-  #kernel32: Record<string, any>;
+  #advapi32: Record<string, any>
+  #kernel32: Record<string, any>
 
   // Win32 API implementation
   // - Callback from StartServiceCtrlDispatcherA)
   #serviceMainCallback?: Deno.UnsafeCallback<{
-    parameters: ["u64", "pointer"];
-    result: "void";
-  }>;
+    parameters: ["u64", "pointer"]
+    result: "void"
+  }>
   // - Callback from RegisterServiceCtrlHandlerExA
   #handlerCallback:
     | Deno.UnsafeCallback<{
-        parameters: ["u32", "u32", "pointer", "pointer"];
-        struct: undefined;
-        result: "void";
-      }>
-    | null = null;
+      parameters: ["u32", "u32", "pointer", "pointer"]
+      struct: undefined
+      result: "void"
+    }>
+    | null = null
   // - Service status handle
-  #hServiceStatus: bigint | null = null;
+  #hServiceStatus: bigint | null = null
   // . Worker running a separate thread for StartServiceCtrlDispatcherA
-  #dispatcherThread?: Worker;
+  #dispatcherThread?: Worker
 
   /**
    * Creates a new WindowsService instance and initializes win32 api

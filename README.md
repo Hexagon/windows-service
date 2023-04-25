@@ -43,7 +43,7 @@ For more details and examples, please refer to the [example implementation](http
 
 Install the service with
 
-``` 
+```
 sc.exe create my-test-service binPath= "c:\full\path\to\deno.exe run" -A --unstable --allow-ffi "C:/path/to/windows-service/example.ts"
 ```
 
