@@ -44,13 +44,15 @@ For more details and examples, please refer to the [example implementation](http
 Install the service with
 
 ```
-sc.exe create my-test-service binPath= "c:\full\path\to\deno.exe run" -A --unstable --allow-ffi "C:/path/to/windows-service/example.ts"
+sc.exe create my-test-service binPath= "c:\full\path\to\deno.exe run" --unstable --allow-ffi "C:/path/to/windows-service/example.ts"
 ```
+
+Make sure to adjust the Deno permissions as neccessary.
 
 **Or** compile it using
 
 ```
-deno compile -A --unstable --allow-ffi example.ts --include dispatcher.js --output my-test-service.exe
+deno compile --unstable --allow-ffi example.ts --include dispatcher.js --output my-test-service.exe
 ```
 
 And install using
@@ -71,19 +73,19 @@ to run with its arguments after `--`.
 To run the generic service runner with a command:
 
 ```
-deno run -A --allow-ffi --unstable https://deno.land/x/windows_service/run.ts --serviceName your-service -- your_command your_arguments
+deno run --allow-ffi --unstable https://deno.land/x/windows_service/run.ts --serviceName your-service -- your_command your_arguments
 ```
 
 If you want to debug (execute the command directly without the Windows service part), pass the `--debug` flag:
 
 ```
-deno run -A --allow-ffi --unstable your_script.ts --serviceName your-service --debug -- your_command your_arguments
+deno run --allow-ffi --unstable your_script.ts --serviceName your-service --debug -- your_command your_arguments
 ```
 
 To install a service using this library and a generic command
 
 ```
-sc.exe create your-service binPath= "c:/full/path/to/deno.exe run -A --unstable --allow-ffi https://deno.land/x/windows_service/run.ts --serviceName your-service -- your_command your_arguments"
+sc.exe create your-service binPath= "c:/full/path/to/deno.exe run --unstable --allow-ffi https://deno.land/x/windows_service/run.ts --serviceName your-service -- your_command your_arguments"
 ```
 
 ## License
