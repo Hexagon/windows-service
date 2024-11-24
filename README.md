@@ -2,6 +2,8 @@
 
 A Deno library that provides a simple way to create Windows services using Deno applications without any external tools.
 
+**Note:** This package is mainly intended for creating interactive Windows services using Deno. If you simply want to launch a Deno application as a service,  https://github.com/cross-org/service is easier to use, has a built in service installer, and it uses this package internally.
+
 ## Features
 
 - Run Deno applications as Windows services
