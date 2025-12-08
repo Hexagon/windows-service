@@ -1,4 +1,5 @@
 import { SERVICE_CONTROL_CONTINUE, SERVICE_CONTROL_PAUSE, SERVICE_CONTROL_STOP, WindowsServiceStatus } from "./servicestatus.ts"
+import dispatcher from './dispatcher.js' with { type: 'text' };
 
 interface WindowsServiceCallbacks {
   debug?: (message: string) => void
@@ -199,8 +200,12 @@ class WindowsService {
     const serviceTablePointerValue = Deno.UnsafePointer.value(Deno.UnsafePointer.of(serviceTableBuffer))
     this.#unsafeRefs.set("serviceTableBuffer", serviceTableBuffer)
 
-    // Call StartServiceCtrlDispatcherA through the worker
-    this.#dispatcherThread = new Worker(new URL("./dispatcher.js", import.meta.url).href, { type: "module" })
+    // Call StartServiceCtrlDispatcherA through the worker. Workers must be
+    // defined in a separate script, which is a problem for tree-shaking,
+    // but we can pass a data: URL with the entire script inline, getting it
+    // bundled in our own module.
+    const dispatcherURL = "data:application/javascript;base64," + btoa(dispatcher);
+    this.#dispatcherThread = new Worker(dispatcherURL, { type: "module" })
 
     // Send start
     this.#dispatcherThread.postMessage(serviceTablePointerValue)
