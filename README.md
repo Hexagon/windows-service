@@ -60,7 +60,7 @@ deno compile --unstable --allow-ffi example.ts --include dispatcher.js --output 
 And install using
 
 ```
-sc.exe create my-test-service binPath= "C:/path/to/windows-service/my-test-service.ts"
+sc.exe create my-test-service binPath= "C:/path/to/windows-service/my-test-service.exe"
 ```
 
 Note that dispatcher.ts need to be included using `--include` at compile time, else the service worker wont work.
