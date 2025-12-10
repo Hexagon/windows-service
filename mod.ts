@@ -204,6 +204,13 @@ class WindowsService {
     // defined in a separate script, which is a problem for tree-shaking,
     // but we can pass a data: URL with the entire script inline, getting it
     // bundled in our own module.
+	 // If the following line crashes with the error "InvalidCharacterError:
+	 // Cannot encode string: string contains characters outside of the Latin1
+	 // range", there is probably a comment added to the dispatcher with a
+	 // non-ASCII character in it. Consider replacing btoa with the expression
+	 // Buffer.from(dispatcher, 'UTF-8').toBase64() if you have a new enough
+	 // version of Node/Deno. unescape(decodeURIComponent(dispatcher)) has
+	 // been suggested, but apart from being deprecated, won't necessarily work.
     const dispatcherURL = "data:application/javascript;base64," + btoa(dispatcher);
     this.#dispatcherThread = new Worker(dispatcherURL, { type: "module" })
 
